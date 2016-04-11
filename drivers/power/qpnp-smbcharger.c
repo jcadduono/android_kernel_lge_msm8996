@@ -71,11 +71,8 @@
 #include <soc/qcom/lge/power/lge_board_revision.h>
 #endif
 
-#ifdef CONFIG_LGE_PM_WAKE_LOCK_FOR_CHG_LOGO
-#include <soc/qcom/lge/board_lge.h>
-#endif
-
 #ifdef CONFIG_LGE_PM
+#include <soc/qcom/lge/board_lge.h>
 #include <linux/wakelock.h>
 #define CONFIG_LGE_PM_DIS_AICL_IRQ_WAKE
 #define CONFIG_LGE_PM_VFLOAT_TRIM_RESTORE
@@ -696,7 +693,6 @@ static unsigned int factory_mode;
 #endif
 
 #ifdef CONFIG_LGE_PM_LGE_POWER_CLASS_CHARGING_CONTROLLER
-#ifdef CONFIG_LGE_PM_DEBUG
 static bool is_usb_present(struct smbchg_chip *chip);
 
 static int get_usb_adc(struct smbchg_chip *chip)
@@ -728,7 +724,6 @@ static int get_usb_adc(struct smbchg_chip *chip)
 
 	return usbin_vol;
 }
-#endif
 
 static int get_prop_batt_health(struct smbchg_chip *chip);
 
@@ -7705,7 +7700,7 @@ static int smbchg_get_iusb(struct smbchg_chip *chip)
 static int smbchg_batt_id_checker(struct smbchg_chip *chip) {
 	union lge_power_propval lge_val = {0,};
 	int rc;
-	bool valid_id;
+	bool valid_id = false;
 
 	if (!chip->lge_batt_id_lpc)
 		chip->lge_batt_id_lpc = lge_power_get_by_name("lge_batt_id");
@@ -7718,10 +7713,7 @@ static int smbchg_batt_id_checker(struct smbchg_chip *chip) {
 		else
 			valid_id = lge_val.intval;
 
-			return valid_id;
 	}
-
-	valid_id = false;
 
 	return valid_id;
 }
@@ -9154,8 +9146,8 @@ static void lgcc_charger_reginfo(struct work_struct *work) {
 	else
 		delay_time = CHARGING_INFORM_NORMAL_TIME;
 
-		schedule_delayed_work(&chip->charging_info_work,
-			round_jiffies_relative(msecs_to_jiffies(delay_time)));
+	schedule_delayed_work(&chip->charging_info_work,
+		round_jiffies_relative(msecs_to_jiffies(delay_time)));
 
 }
 #endif
