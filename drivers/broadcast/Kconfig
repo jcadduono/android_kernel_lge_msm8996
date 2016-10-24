@@ -1,0 +1,14 @@
+# LGE Broadcast Device Driver Support
+
+menu "LGE Broadcast Device Support"
+
+config LGE_BROADCAST_TDMB
+    bool "LGE broadcast TDMB device Driver"
+    depends on (MACH_MSM8992_P1_KR || MACH_MSM8992_PPLUS_KR || MACH_MSM8996_H1_KR || MACH_MSM8996_ELSA_KR)
+    default y
+    help
+      Select this if you want to use TDMB broadcast service
+
+source "drivers/broadcast/tdmb/Kconfig"
+
+endmenu
