@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stock kernel for LG Electronics msm8996 devices build script by jcadduono
+# Kali NetHunter kernel for LG Electronics msm8996 devices build script by jcadduono
 
 ################### BEFORE STARTING ################
 #
@@ -114,7 +114,7 @@ export CROSS_COMPILE=$TOOLCHAIN/bin/aarch64-linux-gnu-
 [ -x "${CROSS_COMPILE}gcc" ] ||
 ABORT "Unable to find gcc cross-compiler at location: ${CROSS_COMPILE}gcc"
 
-[ "$TARGET" ] || TARGET=lge
+[ "$TARGET" ] || TARGET=nethunter
 [ "$1" ] && DEVICE=$1
 [ "$DEVICE" ] || DEVICE=h918
 
