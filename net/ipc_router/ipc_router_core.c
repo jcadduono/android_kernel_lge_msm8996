@@ -3039,6 +3039,12 @@ static int msm_ipc_router_write_pkt(struct msm_ipc_port *src,
 	hdr->dst_node_id = rport_ptr->node_id;
 	hdr->dst_port_id = rport_ptr->port_id;
 
+	if (unlikely(!virt_addr_valid(pkt->pkt_fragment_q)))
+		 __dma_flush_range((void *)&pkt->pkt_fragment_q, (void *)&pkt->pkt_fragment_q + (sizeof(struct sk_buff_head *)));
+
+	if (pkt->pkt_fragment_q == NULL)
+		return -EINVAL;
+
 	ret = ipc_router_tx_wait(src, rport_ptr, &set_confirm_rx, timeout);
 	if (ret < 0)
 		return ret;

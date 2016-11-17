@@ -398,8 +398,10 @@ void mdss_fb_set_backlight_ex(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->allow_bl_update_ex) && !IS_CALIB_MODE_BL(mfd)) ||
 		mfd->panel_info->cont_splash_enabled) {
-		if (mfd->panel_info->aod_cur_mode != AOD_PANEL_MODE_U2_BLANK) {
+		if ((mfd->panel_info->aod_cur_mode != AOD_PANEL_MODE_U2_BLANK)
+			&& (mfd->panel_info->aod_cur_mode != AOD_PANEL_MODE_U2_UNBLANK)) {
 			mfd->unset_bl_level_ex = bkl_lvl;
+			pr_info("[AOD] Skip ext-BL ctrl except U2 & U2unblank mode\n");
 			return;
 		}
 	} else if (mdss_fb_is_power_on(mfd) && mfd->panel_info->panel_dead) {
