@@ -3045,6 +3045,9 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	}
 
 	fsg_mod_data.removable[0] = true;
+	fsg_mod_data.cdrom[0] = false;
+	fsg_mod_data.ro[0] = false;
+	fsg_mod_data.nofua[0] = false;
 	fsg_config_from_params(&m_config, &fsg_mod_data, fsg_num_buffers);
 
 #ifdef CONFIG_LGE_USB_G_AUTORUN
