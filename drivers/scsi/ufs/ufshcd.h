@@ -75,6 +75,18 @@
 
 #define UFS_BIT(x)	BIT(x)
 
+#if defined(CONFIG_UFS_LGE_FEATURE) && defined(CONFIG_MACH_MSM8996_ELSA) && !defined(CONFIG_MACH_MSM8996_ELSA_KDDI_JP)
+#define LGE_UFS_THERM_TWEAK
+#endif
+
+#ifdef LGE_UFS_THERM_TWEAK
+#define CHECK_THERMAL_TIME  30000
+enum lge_ufs_tweak_status {
+	UFS_NORMAL_THERM_ENABLE_CLK_SCALING,
+	UFS_LOW_THERM_DISABLE_CLK_SCALING,
+};
+#endif
+
 struct ufs_hba;
 
 enum dev_cmd_type {
@@ -546,6 +558,14 @@ struct debugfs_files {
 	u32 err_inj_scenario_mask;
 	struct fault_attr fail_attr;
 #endif
+#ifdef CONFIG_UFS_LGE_FEATURE
+    struct dentry *dump_config_desc;
+    struct dentry *dump_unit_desc;
+    struct dentry *dump_geo_desc;
+    struct dentry *dump_inter_desc;
+    struct dentry *dump_power_desc;
+    struct dentry *dump_string_desc;
+#endif
 	bool is_sys_suspended;
 };
 
@@ -807,6 +827,7 @@ struct ufs_hba {
 	u32 saved_uic_err;
 	u32 saved_ce_err;
 	bool silence_err_logs;
+	bool force_host_reset;
 
 	/* Device management request data */
 	struct ufs_dev_cmd dev_cmd;
@@ -840,6 +861,10 @@ struct ufs_hba {
 
 	struct ufs_clk_gating clk_gating;
 	struct ufs_hibern8_on_idle hibern8_on_idle;
+
+#ifdef LGE_UFS_THERM_TWEAK
+	struct delayed_work therm_clk_ctrl_work;
+#endif
 
 	/* Control to enable/disable host capabilities */
 	u32 caps;
@@ -886,6 +911,10 @@ struct ufs_hba {
 	bool no_ref_clk_gating;
 
 	int scsi_block_reqs_cnt;
+
+#ifdef CONFIG_UFS_LGE_CARD_RESET
+	void*	card_reset_info;
+#endif
 };
 
 /* Returns true if clocks can be gated. Otherwise false */
@@ -1045,6 +1074,14 @@ static inline int ufshcd_dme_peer_get(struct ufs_hba *hba,
 }
 
 int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+
+#ifdef CONFIG_UFS_LGE_FEATURE
+int ufshcd_read_geo_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+int ufshcd_read_config_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+int ufshcd_read_unit_desc(struct ufs_hba *hba, int u_index, u8 *buf, u32 size);
+int ufshcd_read_inter_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+int ufshcd_read_power_desc(struct ufs_hba *hba, u8 *buf, u32 size);
+#endif
 
 static inline bool ufshcd_is_hs_mode(struct ufs_pa_layer_attr *pwr_info)
 {

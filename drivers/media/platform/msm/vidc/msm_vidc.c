@@ -492,9 +492,17 @@ int map_and_register_buf(struct msm_vidc_inst *inst, struct v4l2_buffer *b)
 			goto exit;
 		}
 
+/* LGE_CHANG_S, CASE#2591959 Fix Afreeca TV blinking issue when swithcing camera 2016-08-24 sungmin.cho@lge.com */
+#ifdef QUALCOMM_ORIGINAL
 		same_fd_handle = get_same_fd_buffer(
 				&inst->registeredbufs,
 				b->m.planes[i].reserved[0]);
+#else
+		same_fd_handle = i ? get_same_fd_buffer(
+				&inst->registeredbufs,
+				b->m.planes[i].reserved[0]) : NULL;
+#endif
+/* LGE_CHANG_E, CASE#2591959 Fix Afreeca TV blinking issue when swithcing camera 2016-08-24 sungmin.cho@lge.com */
 
 		populate_buf_info(binfo, b, i);
 		if (same_fd_handle) {
