@@ -332,8 +332,7 @@ static int rh850_process_rx(struct rh850_can *priv_data, char *rx_buf)
 			       rx_buf, 2);
 			data = priv_data->assembly_buffer;
 			resp = (struct spi_miso *)data;
-			length = resp->len + sizeof(*resp)
-					- priv_data->assembly_buffer_size;
+			length = resp->len - priv_data->assembly_buffer_size;
 			if (length > 0)
 				memcpy(priv_data->assembly_buffer +
 				       priv_data->assembly_buffer_size,
@@ -354,7 +353,7 @@ static int rh850_process_rx(struct rh850_can *priv_data, char *rx_buf)
 		      length_processed, length_left, priv_data->xfer_length);
 		length_processed += length;
 		if (length_left >= sizeof(*resp) &&
-		    resp->len + sizeof(*resp) <= length_left) {
+		    resp->len <= length_left) {
 			struct spi_miso *resp =
 					(struct spi_miso *)data;
 			ret = rh850_process_response(priv_data, resp,
@@ -436,6 +435,30 @@ static int rh850_query_firmware_version(struct rh850_can *priv_data)
 
 	req = (struct spi_mosi *)tx_buf;
 	req->cmd = CMD_GET_FW_VERSION;
+	req->len = 0;
+	req->seq = atomic_inc_return(&priv_data->msg_seq);
+
+	ret = rh850_do_spi_transaction(priv_data);
+	mutex_unlock(&priv_data->spi_lock);
+
+	return ret;
+}
+
+static int rh850_query_firmware_br_version(struct rh850_can *priv_data)
+{
+	char *tx_buf, *rx_buf;
+	int ret;
+	struct spi_mosi *req;
+
+	mutex_lock(&priv_data->spi_lock);
+	tx_buf = priv_data->tx_buf;
+	rx_buf = priv_data->rx_buf;
+	memset(tx_buf, 0, XFER_BUFFER_SIZE);
+	memset(rx_buf, 0, XFER_BUFFER_SIZE);
+	priv_data->xfer_length = XFER_BUFFER_SIZE;
+
+	req = (struct spi_mosi *)tx_buf;
+	req->cmd = CMD_GET_FW_BR_VERSION;
 	req->len = 0;
 	req->seq = atomic_inc_return(&priv_data->msg_seq);
 
@@ -818,7 +841,8 @@ static int rh850_do_blocking_ioctl(struct net_device *netdev,
 		len = ioctl_data->len;
 		data = ioctl_data->data;
 	}
-	LOGDI("rh850_do_blocking_ioctl len %d\n", len);
+	LOGDI("rh850_do_blocking_ioctl len and data %d %x\n",
+	      len, (void *)data);
 	mutex_lock(&priv_data->spi_lock);
 
 	priv_data->wait_cmd = spi_cmd;
@@ -1024,6 +1048,7 @@ static int rh850_probe(struct spi_device *spi)
 	dev_info(dev, "Request irq %d ret %d\n", spi->irq, err);
 
 	rh850_query_firmware_version(priv_data);
+	rh850_query_firmware_br_version(priv_data);
 	return 0;
 
 unregister_candev:

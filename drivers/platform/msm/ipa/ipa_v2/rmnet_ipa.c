@@ -672,7 +672,7 @@ static int wwan_add_ul_flt_rule_to_ipa(void)
 	req->install_status = QMI_RESULT_SUCCESS_V01;
 	req->filter_index_list_len = num_q6_rule;
 	mutex_lock(&ipa_qmi_lock);
-	for (i = 0; i < num_q6_rule; i++) {
+	for (i = 0; i < num_q6_rule && (ipa_qmi_ctx != NULL); i++) {
 		if (ipa_qmi_ctx->q6_ul_filter_rule[i].ip == IPA_IP_v4) {
 			req->filter_index_list[i].filter_index = num_v4_rule;
 			num_v4_rule++;
@@ -1132,16 +1132,14 @@ static void apps_ipa_tx_complete_notify(void *priv,
 	struct net_device *dev = (struct net_device *)priv;
 	struct wwan_private *wwan_ptr;
 
-	if (dev != ipa_netdevs[0]) {
-		IPAWANDBG("Received pre-SSR packet completion\n");
-		dev_kfree_skb_any(skb);
+	if (evt != IPA_WRITE_DONE) {
+		IPAWANDBG("unsupported event on Tx callback\n");
 		return;
 	}
 
-	if (evt != IPA_WRITE_DONE) {
-		IPAWANERR("unsupported evt on Tx callback, Drop the packet\n");
+	if (dev != ipa_netdevs[0]) {
+		IPAWANDBG("Received pre-SSR packet completion\n");
 		dev_kfree_skb_any(skb);
-		dev->stats.tx_dropped++;
 		return;
 	}
 

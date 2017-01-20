@@ -524,7 +524,6 @@ struct dwc3_ep_events {
  * @trb_dma_pool: dma pool used to get aligned trb memory pool
  * @trb_pool: array of transaction buffers
  * @trb_pool_dma: dma address of @trb_pool
- * @num_trbs: num of trbs in the trb dma pool
  * @free_slot: next slot which is going to be used
  * @busy_slot: first slot which is owned by HW
  * @desc: usb_endpoint_descriptor pointer
@@ -552,7 +551,6 @@ struct dwc3_ep {
 	struct dma_pool		*trb_dma_pool;
 	struct dwc3_trb		*trb_pool;
 	dma_addr_t		trb_pool_dma;
-	u32			num_trbs;
 	u32			free_slot;
 	u32			busy_slot;
 	const struct usb_ss_ep_comp_descriptor *comp_desc;
@@ -750,6 +748,10 @@ struct dwc3_scratchpad_array {
 #define DWC3_CONTROLLER_SET_CURRENT_DRAW_EVENT		10
 #define DWC3_CONTROLLER_RESTART_USB_SESSION		11
 #define DWC3_CONTROLLER_NOTIFY_DISABLE_UPDXFER		12
+
+#ifdef CONFIG_LGE_USB_MAXIM_EVP
+#define DWC3_EVP_CONNECT_EVENT				255
+#endif
 
 #define MAX_INTR_STATS					10
 /**
@@ -978,6 +980,11 @@ struct dwc3 {
 	unsigned                bh_completion_time[MAX_INTR_STATS];
 	unsigned                bh_handled_evt_cnt[MAX_INTR_STATS];
 	unsigned                bh_dbg_index;
+#ifdef CONFIG_LGE_USB_MAXIM_EVP
+	struct delayed_work	dcp_check_work;
+	unsigned int		evp_usbctrl_err_cnt;
+	bool evp_connect;
+#endif
 	ktime_t			irq_start_time[MAX_INTR_STATS];
 	ktime_t			t_pwr_evt_irq;
 	unsigned                irq_completion_time[MAX_INTR_STATS];
@@ -1150,6 +1157,9 @@ static inline void dwc3_host_exit(struct dwc3 *dwc)
 #if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_gadget_init(struct dwc3 *dwc);
 void dwc3_gadget_exit(struct dwc3 *dwc);
+#ifdef CONFIG_LGE_USB_MAXIM_EVP
+void dwc_dcp_check_work(struct work_struct *w);
+#endif
 void dwc3_gadget_restart(struct dwc3 *dwc);
 int dwc3_gadget_set_test_mode(struct dwc3 *dwc, int mode);
 int dwc3_gadget_get_link_state(struct dwc3 *dwc);

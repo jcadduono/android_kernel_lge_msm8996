@@ -796,8 +796,6 @@ static void emac_poll_hwtxtstamp(struct emac_adapter *adpt)
 				 */
 				while ((pskb = __skb_dequeue(pending_q))
 				       != skb) {
-					if (!pskb)
-						break;
 					EMAC_HWTXTSTAMP_CB(pskb)->sec = 0;
 					EMAC_HWTXTSTAMP_CB(pskb)->ns = 0;
 					__skb_queue_tail(q, pskb);
@@ -1258,8 +1256,7 @@ static void emac_tx_map(struct emac_adapter *adpt,
 	/* The last buffer info contain the skb address,
 	 * so it will be freed after unmap
 	 */
-	if (tpbuf)
-		tpbuf->skb = skb;
+	tpbuf->skb = skb;
 }
 
 /* Transmit the packet using specified transmit queue */
@@ -3494,22 +3491,6 @@ static int emac_remove(struct platform_device *pdev)
 	struct emac_hw *hw = &adpt->hw;
 
 	pr_info("exiting %s\n", emac_drv_name);
-
-	if (!pm_runtime_enabled(&pdev->dev) ||
-	    !pm_runtime_suspended(&pdev->dev)) {
-		if (netif_running(netdev)) {
-			/* ensure no task/reset is in progress */
-			while (TEST_N_SET_FLAG(adpt, ADPT_STATE_RESETTING))
-				msleep(20); /* Reset might take few 10s of ms */
-
-			emac_down(adpt, 0);
-			CLR_FLAG(adpt, ADPT_STATE_RESETTING);
-		}
-		pm_runtime_disable(netdev->dev.parent);
-		pm_runtime_set_suspended(netdev->dev.parent);
-		pm_runtime_enable(netdev->dev.parent);
-	}
-	pm_runtime_disable(netdev->dev.parent);
 
 	/* Disable EPHY WOL interrupt in suspend */
 	emac_wol_gpio_irq(adpt, false);

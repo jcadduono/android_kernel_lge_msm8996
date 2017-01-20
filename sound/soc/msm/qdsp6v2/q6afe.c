@@ -292,13 +292,11 @@ static int32_t afe_callback(struct apr_client_data *data, void *priv)
 			this_afe.tx_cb(data->opcode, data->token,
 					data->payload,
 					this_afe.tx_private_data);
-			this_afe.tx_cb = NULL;
 		}
 		if (this_afe.rx_cb) {
 			this_afe.rx_cb(data->opcode, data->token,
 					data->payload,
 					this_afe.rx_private_data);
-			this_afe.rx_cb = NULL;
 		}
 
 		return 0;
@@ -561,6 +559,10 @@ int afe_sizeof_cfg_cmd(u16 port_id)
 	case MI2S_TX:
 	case AFE_PORT_ID_PRIMARY_MI2S_RX:
 	case AFE_PORT_ID_PRIMARY_MI2S_TX:
+#ifdef CONFIG_SND_USE_SEC_MI2S
+	case AFE_PORT_ID_SECONDARY_MI2S_RX:
+	case AFE_PORT_ID_SECONDARY_MI2S_TX:
+#endif
 	case AFE_PORT_ID_QUATERNARY_MI2S_RX:
 	case AFE_PORT_ID_QUATERNARY_MI2S_TX:
 	case AFE_PORT_ID_QUINARY_MI2S_RX:
@@ -2182,6 +2184,7 @@ static int afe_send_cmd_port_start(u16 port_id)
 	if (ret) {
 		pr_err("%s: AFE enable for port 0x%x failed %d\n", __func__,
 		       port_id, ret);
+		WARN_ON(1);
 	} else if (this_afe.task != current) {
 		this_afe.task = current;
 		pr_debug("task_name = %s pid = %d\n",
@@ -2806,6 +2809,7 @@ int afe_port_start(u16 port_id, union afe_port_config *afe_config,
 
 fail_cmd:
 	mutex_unlock(&this_afe.afe_cmd_lock);
+
 	return ret;
 }
 
@@ -3217,7 +3221,7 @@ int afe_loopback(u16 enable, u16 rx_port, u16 tx_port)
 				  sizeof(struct afe_port_param_data_v2);
 
 	lb_cmd.dst_port_id = rx_port;
-	lb_cmd.routing_mode = LB_MODE_DEFAULT;
+	lb_cmd.routing_mode = LB_MODE_EC_REF_VOICE_AUDIO;
 	lb_cmd.enable = (enable ? 1 : 0);
 	lb_cmd.loopback_cfg_minor_version = AFE_API_VERSION_LOOPBACK_CONFIG;
 

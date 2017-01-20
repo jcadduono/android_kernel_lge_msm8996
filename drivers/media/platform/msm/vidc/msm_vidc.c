@@ -387,13 +387,6 @@ static inline bool is_dynamic_output_buffer_mode(struct v4l2_buffer *b,
 }
 
 
-static inline bool is_encoder_input_buffer(struct v4l2_buffer *b,
-				struct msm_vidc_inst *inst)
-{
-	return b->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
-			inst->session_type == MSM_VIDC_ENCODER;
-}
-
 static inline void save_v4l2_buffer(struct v4l2_buffer *b,
 						struct buffer_info *binfo)
 {
@@ -491,10 +484,17 @@ int map_and_register_buf(struct msm_vidc_inst *inst, struct v4l2_buffer *b)
 			rc = -EEXIST;
 			goto exit;
 		}
-
+/* LGE_CHANG_S, CASE#2591959 Fix Afreeca TV blinking issue when swithcing camera 2016-08-24 sungmin.cho@lge.com */
+#ifdef QUALCOMM_ORIGINAL
+		same_fd_handle = get_same_fd_buffer(
+				&inst->registeredbufs,
+				b->m.planes[i].reserved[0]);
+#else
 		same_fd_handle = i ? get_same_fd_buffer(
 				&inst->registeredbufs,
 				b->m.planes[i].reserved[0]) : NULL;
+#endif
+/* LGE_CHANG_E, CASE#2591959 Fix Afreeca TV blinking issue when swithcing camera 2016-08-24 sungmin.cho@lge.com */
 
 		populate_buf_info(binfo, b, i);
 		if (same_fd_handle) {
@@ -914,7 +914,7 @@ int msm_vidc_dqbuf(void *instance, struct v4l2_buffer *b)
 	if (rc)
 		return rc;
 
-	for (i = b->length - 1; i >= 0 ; i--) {
+	for (i = 0; i < b->length; i++) {
 		if (EXTRADATA_IDX(b->length) &&
 			(i == EXTRADATA_IDX(b->length)) &&
 			!b->m.planes[i].m.userptr) {

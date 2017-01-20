@@ -11,6 +11,9 @@
  */
 
 #define pr_fmt(fmt) "SMB1351 %s: " fmt, __func__
+#ifdef CONFIG_LGE_PM_PARALLEL_CHARGING
+#define DEFINE
+#endif
 
 #include <linux/i2c.h>
 #include <linux/debugfs.h>
@@ -747,8 +750,13 @@ static int smb1351_usb_suspend(struct smb1351_charger *chip, int reason,
 
 	suspended = chip->usb_suspended_status;
 
+#ifdef CONFIG_LGE_PM_PARALLEL_CHARGING
+	pr_err("reason = %d requested_suspend = %d suspended_status = %d\n",
+						reason, suspend, suspended);
+#else
 	pr_debug("reason = %d requested_suspend = %d suspended_status = %d\n",
 						reason, suspend, suspended);
+#endif
 
 	if (suspend == false)
 		suspended &= ~reason;
@@ -960,6 +968,9 @@ static int smb1351_fastchg_current_set(struct smb1351_charger *chip,
 	int i, rc;
 	bool is_pre_chg = false;
 
+#ifdef CONFIG_LGE_PM_PARALLEL_CHARGING
+	pr_err("%s - fastchg_current[%d]\n", __func__, fastchg_current);
+#endif
 	mutex_lock(&chip->fcc_lock);
 	if (fastchg_current < SMB1351_CHG_PRE_MIN_MA)
 		fastchg_current = SMB1351_CHG_PRE_MIN_MA;
@@ -2456,8 +2467,13 @@ static int smb1351_parallel_set_chg_present(struct smb1351_charger *chip,
 			}
 		}
 
+#ifdef CONFIG_LGE_PM_PARALLEL_CHARGING
+		/* set charging enable by I2C */
+		reg = EN_BY_I2C_0_ENABLE | USBCS_CTRL_BY_I2C;
+#else
 		/* set chg en by pin active low  */
 		reg = chip->parallel_pin_polarity_setting | USBCS_CTRL_BY_I2C;
+#endif
 		rc = smb1351_masked_write(chip, CHG_PIN_EN_CTRL_REG,
 					EN_PIN_CTRL_MASK | USBCS_CTRL_BIT, reg);
 		if (rc) {
@@ -2495,6 +2511,34 @@ static int smb1351_parallel_set_chg_present(struct smb1351_charger *chip,
 			pr_err("Couldn't set fastchg current rc=%d\n", rc);
 			return rc;
 		}
+
+#ifdef CONFIG_LGE_PM_PARALLEL_CHARGING
+		/* adapter allowance to 5~9V */
+		rc = smb1351_masked_write(chip, FLEXCHARGER_REG,
+				CHG_CONFIG_MASK, 0);
+
+		if (rc) {
+			pr_err("Couldn't set charger config adapter rc = %d\n", rc);
+			return rc;
+		}
+
+		/* jeita disable */
+		rc = smb1351_masked_write(chip, THERM_A_CTRL_REG,
+				SOFT_COLD_TEMP_LIMIT_MASK, 0);
+		if (rc) {
+			pr_err("Couldn't set soft cold limit rc = %d\n", rc);
+			return rc;
+		}
+
+		rc = smb1351_masked_write(chip, THERM_A_CTRL_REG,
+				SOFT_HOT_TEMP_LIMIT_MASK, 0);
+
+		if (rc) {
+			pr_err("Couldn't set soft hot limit rc = %d\n", rc);
+			return rc;
+		}
+#endif
+
 		/*
 		 * Suspend USB input (CURRENT reason) to avoid slave start
 		 * charging before any SW logic been run. USB input will be
@@ -3002,11 +3046,6 @@ static void smb1351_chg_remove_work(struct work_struct *work)
 	if (!(reg & IRQ_SOURCE_DET_BIT)) {
 		pr_debug("chg removed\n");
 		chip->chg_present = false;
-		/* clear parallel slave PRESENT */
-		if (parallel_psy && chip->parallel.slave_detected) {
-			pr_debug("set parallel charger un-present!\n");
-			power_supply_set_present(parallel_psy, false);
-		}
 		power_supply_set_supply_type(chip->usb_psy,
 						POWER_SUPPLY_TYPE_UNKNOWN);
 		power_supply_set_present(chip->usb_psy,
@@ -3015,6 +3054,11 @@ static void smb1351_chg_remove_work(struct work_struct *work)
 		power_supply_set_dp_dm(chip->usb_psy,
 				POWER_SUPPLY_DP_DM_DPR_DMR);
 		chip->apsd_rerun = false;
+		/* clear parallel slave PRESENT */
+		if (parallel_psy && chip->parallel.slave_detected) {
+			pr_debug("set parallel charger un-present!\n");
+			power_supply_set_present(parallel_psy, false);
+		}
 	} else if (!chip->chg_remove_work_scheduled) {
 		chip->chg_remove_work_scheduled = true;
 		goto reschedule;
@@ -3064,15 +3108,15 @@ static int smb1351_usbin_uv_handler(struct smb1351_charger *chip, u8 status)
 			}
 		} else {
 			chip->chg_present = false;
-			/* clear parallel slave PRESENT */
-			if (parallel_psy && chip->parallel.slave_detected)
-				power_supply_set_present(parallel_psy, false);
 			power_supply_set_supply_type(chip->usb_psy,
 						POWER_SUPPLY_TYPE_UNKNOWN);
 			power_supply_set_present(chip->usb_psy,
 						chip->chg_present);
 			pr_debug("updating usb_psy present=%d\n",
 							chip->chg_present);
+			/* clear parallel slave RESENT */
+			if (parallel_psy && chip->parallel.slave_detected)
+				power_supply_set_present(parallel_psy, false);
 		}
 		return 0;
 	}
@@ -3116,12 +3160,12 @@ static int smb1351_usbin_ov_handler(struct smb1351_charger *chip, u8 status)
 	if (status != 0) {
 		chip->chg_present = false;
 		chip->usbin_ov = true;
-		/* clear parallel slave PRESENT */
-		if (parallel_psy && chip->parallel.slave_detected)
-			power_supply_set_present(parallel_psy, false);
 		power_supply_set_supply_type(chip->usb_psy,
 						POWER_SUPPLY_TYPE_UNKNOWN);
 		power_supply_set_present(chip->usb_psy, chip->chg_present);
+		/* clear parallel slave PRESENT */
+		if (parallel_psy && chip->parallel.slave_detected)
+			power_supply_set_present(parallel_psy, false);
 	} else {
 		chip->usbin_ov = false;
 		if (reg & IRQ_USBIN_UV_BIT)
@@ -3870,24 +3914,10 @@ static void smb1351_external_power_changed(struct power_supply *psy)
 {
 	struct smb1351_charger *chip = container_of(psy,
 				struct smb1351_charger, batt_psy);
-	struct power_supply *parallel_psy =
-				smb1351_get_parallel_slave(chip);
 	union power_supply_propval prop = {0,};
-	int rc, online = 0, slave_present = 0;
+	int rc, online = 0;
 
 	battery_soc_changed(chip);
-
-	if (parallel_psy) {
-		parallel_psy->get_property(parallel_psy,
-				POWER_SUPPLY_PROP_PRESENT, &prop);
-		slave_present = prop.intval;
-		/* Don't update main charger ICL if slave is enabled */
-		if (chip->parallel.slave_detected && slave_present
-				&& chip->parallel.slave_icl_ma != 0) {
-			pr_debug("Ignore ICL setting as parallel-slave is enabled\n");
-			return;
-		}
-	}
 
 	rc = chip->usb_psy->get_property(chip->usb_psy,
 				POWER_SUPPLY_PROP_ONLINE, &prop);

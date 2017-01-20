@@ -276,6 +276,8 @@ fail_ep_exists:
  */
 int ipa2_disconnect_mhi_pipe(u32 clnt_hdl)
 {
+	struct ipa_ep_context *ep;
+
 	IPA_MHI_FUNC_ENTRY();
 
 	if (clnt_hdl >= ipa_ctx->ipa_num_pipes) {
@@ -288,8 +290,7 @@ int ipa2_disconnect_mhi_pipe(u32 clnt_hdl)
 		return -EINVAL;
 	}
 
-	ipa_ctx->ep[clnt_hdl].valid = 0;
-
+	ep->valid = 0;
 	ipa_delete_dflt_flt_rules(clnt_hdl);
 
 	IPA_MHI_DBG("client (ep: %d) disconnected\n", clnt_hdl);
@@ -301,13 +302,14 @@ int ipa2_mhi_resume_channels_internal(enum ipa_client_type client,
 		bool LPTransitionRejected, bool brstmode_enabled,
 		union __packed gsi_channel_scratch ch_scratch, u8 index)
 {
+	int i;
 	int res;
 
 	IPA_MHI_FUNC_ENTRY();
 	res = ipa_uc_mhi_resume_channel(index, LPTransitionRejected);
 	if (res) {
-		IPA_MHI_ERR("failed to suspend channel %u error %d\n",
-			index, res);
+		IPA_MHI_ERR("failed to suspend channel %d error %d\n",
+			i, res);
 		return res;
 	}
 

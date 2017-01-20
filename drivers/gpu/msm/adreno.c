@@ -826,8 +826,6 @@ static struct {
 	 { ADRENO_QUIRK_IOMMU_SYNC, "qcom,gpu-quirk-iommu-sync" },
 	 { ADRENO_QUIRK_CRITICAL_PACKETS, "qcom,gpu-quirk-critical-packets" },
 	 { ADRENO_QUIRK_FAULT_DETECT_MASK, "qcom,gpu-quirk-fault-detect-mask" },
-	 { ADRENO_QUIRK_DISABLE_RB_DP2CLOCKGATING,
-			"qcom,gpu-quirk-dp2clockgating-disable" },
 };
 
 static int adreno_of_get_power(struct adreno_device *adreno_dev,
@@ -1759,30 +1757,6 @@ static int adreno_getproperty(struct kgsl_device *device,
 			}
 			if (copy_to_user(value, &shadowprop,
 				sizeof(shadowprop))) {
-				status = -EFAULT;
-				break;
-			}
-			status = 0;
-		}
-		break;
-	case KGSL_PROP_DEVICE_QDSS_STM:
-		{
-			struct kgsl_qdss_stm_prop qdssprop = {0};
-			struct kgsl_memdesc *qdss_desc =
-				kgsl_mmu_get_qdss_global_entry(device);
-
-			if (sizebytes != sizeof(qdssprop)) {
-				status = -EINVAL;
-				break;
-			}
-
-			if (qdss_desc) {
-				qdssprop.gpuaddr = qdss_desc->gpuaddr;
-				qdssprop.size = qdss_desc->size;
-			}
-
-			if (copy_to_user(value, &qdssprop,
-						sizeof(qdssprop))) {
 				status = -EFAULT;
 				break;
 			}

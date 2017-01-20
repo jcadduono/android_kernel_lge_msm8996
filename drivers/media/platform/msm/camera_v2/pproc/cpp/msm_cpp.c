@@ -148,7 +148,11 @@ static int msm_cpp_buffer_private_ops(struct cpp_device *cpp_dev,
 	qcmd;			 \
 })
 
+#ifndef CONFIG_MACH_LGE
 #define MSM_CPP_MAX_TIMEOUT_TRIAL 1
+#else
+#define MSM_CPP_MAX_TIMEOUT_TRIAL 3
+#endif
 
 struct msm_cpp_timer_data_t {
 	struct cpp_device *cpp_dev;
@@ -1548,6 +1552,15 @@ static void msm_cpp_do_timeout_work(struct work_struct *work)
 		processed_frame[i] = cpp_timer.data.processed_frame[i];
 
 	for (i = 0; i < queue_len; i++) {
+		/*LGE_CHANGE S, fix NULL pointer panic while msm_cpp_do_timeout_work, 2016-08-02, Camera-Stability@lge.com*/
+		if(processed_frame[i] == NULL){
+			pr_err("%s:%d: processed_frame[%d] is null \n",
+			__func__, __LINE__,i);
+
+			continue;
+		}
+		/*LGE_CHANGE E, fix NULL pointer panic while msm_cpp_do_timeout_work, 2016-08-02, Camera-Stability@lge.com*/
+
 		pr_warn("Rescheduling for identity=0x%x, frame_id=%03d\n",
 			processed_frame[i]->identity,
 			processed_frame[i]->frame_id);
@@ -1662,8 +1675,19 @@ static int msm_cpp_send_frame_to_hardware(struct cpp_device *cpp_dev,
 		spin_lock_irqsave(&cpp_timer.data.processed_frame_lock, flags);
 		msm_enqueue(&cpp_dev->processing_q,
 			&frame_qcmd->list_frame);
+		/*LGE_CHANGE S, fix NULL pointer panic while msm_cpp_do_timeout_work, 2016-08-02, Camera-Stability@lge.com*/
+		#if 0
 		cpp_timer.data.processed_frame[cpp_dev->processing_q.len - 1] =
 			process_frame;
+		#else
+		for (i = 0; i < MAX_CPP_PROCESSING_FRAME; i++){
+			if(cpp_timer.data.processed_frame[i] == NULL){
+				cpp_timer.data.processed_frame[i] = process_frame;
+				break;
+			}
+		}
+		#endif
+		/*LGE_CHANGE E, fix NULL pointer panic while msm_cpp_do_timeout_work, 2016-08-02, Camera-Stability@lge.com*/
 		queue_len = cpp_dev->processing_q.len;
 		spin_unlock_irqrestore(&cpp_timer.data.processed_frame_lock,
 			flags);
@@ -2274,21 +2298,19 @@ static int msm_cpp_cfg_frame(struct cpp_device *cpp_dev,
 		return -EINVAL;
 	}
 
-	if (!new_frame->partial_frame_indicator) {
-		if (cpp_frame_msg[new_frame->msg_len - 1] !=
-			MSM_CPP_MSG_ID_TRAILER) {
-			pr_err("Invalid frame message\n");
-			return -EINVAL;
-		}
+	if (cpp_frame_msg[new_frame->msg_len - 1] !=
+		MSM_CPP_MSG_ID_TRAILER) {
+		pr_err("Invalid frame message\n");
+		return -EINVAL;
+	}
 
-		if ((stripe_base + new_frame->num_strips * stripe_size + 1) !=
-			new_frame->msg_len) {
-			pr_err("Invalid frame message,len=%d,expected=%d\n",
-				new_frame->msg_len,
-				(stripe_base +
-				new_frame->num_strips * stripe_size + 1));
-			return -EINVAL;
-		}
+	if ((stripe_base + new_frame->num_strips * stripe_size + 1) !=
+		new_frame->msg_len) {
+		pr_err("Invalid frame message,len=%d,expected=%d\n",
+			new_frame->msg_len,
+			(stripe_base +
+			new_frame->num_strips * stripe_size + 1));
+		return -EINVAL;
 	}
 
 	if (cpp_dev->iommu_state != CPP_IOMMU_STATE_ATTACHED) {

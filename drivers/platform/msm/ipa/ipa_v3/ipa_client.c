@@ -1055,83 +1055,6 @@ static bool ipa3_is_legal_params(struct ipa_request_gsi_channel_params *params)
 		return true;
 }
 
-int ipa3_smmu_map_peer_reg(phys_addr_t phys_addr, bool map)
-{
-	struct iommu_domain *smmu_domain;
-	int res;
-
-	if (ipa3_ctx->smmu_s1_bypass)
-		return 0;
-
-	smmu_domain = ipa3_get_smmu_domain();
-	if (!smmu_domain) {
-		IPAERR("invalid smmu domain\n");
-		return -EINVAL;
-	}
-
-	if (map) {
-		res = ipa3_iommu_map(smmu_domain, phys_addr, phys_addr,
-			PAGE_SIZE, IOMMU_READ | IOMMU_WRITE | IOMMU_DEVICE);
-	} else {
-		res = iommu_unmap(smmu_domain, phys_addr, PAGE_SIZE);
-		res = (res != PAGE_SIZE);
-	}
-	if (res) {
-		IPAERR("Fail to %s reg 0x%pa\n", map ? "map" : "unmap",
-			&phys_addr);
-		return -EINVAL;
-	}
-
-	IPADBG("Peer reg 0x%pa %s\n", &phys_addr, map ? "map" : "unmap");
-
-	return 0;
-}
-
-int ipa3_smmu_map_peer_buff(u64 iova, phys_addr_t phys_addr, u32 size, bool map)
-{
-	struct iommu_domain *smmu_domain;
-	int res;
-
-	if (ipa3_ctx->smmu_s1_bypass)
-		return 0;
-
-	smmu_domain = ipa3_get_smmu_domain();
-	if (!smmu_domain) {
-		IPAERR("invalid smmu domain\n");
-		return -EINVAL;
-	}
-
-	if (map) {
-		res = ipa3_iommu_map(smmu_domain,
-			rounddown(iova, PAGE_SIZE),
-			rounddown(phys_addr, PAGE_SIZE),
-			roundup(size + iova - rounddown(iova, PAGE_SIZE),
-			PAGE_SIZE),
-			IOMMU_READ | IOMMU_WRITE);
-		if (res) {
-			IPAERR("Fail to map 0x%llx->0x%pa\n", iova, &phys_addr);
-			return -EINVAL;
-		}
-	} else {
-		res = iommu_unmap(smmu_domain,
-			rounddown(iova, PAGE_SIZE),
-			roundup(size + iova - rounddown(iova, PAGE_SIZE),
-			PAGE_SIZE));
-		if (res != roundup(size + iova - rounddown(iova, PAGE_SIZE),
-			PAGE_SIZE)) {
-			IPAERR("Fail to unmap 0x%llx->0x%pa\n",
-				iova, &phys_addr);
-			return -EINVAL;
-		}
-	}
-
-	IPADBG("Peer buff %s 0x%llx->0x%pa\n", map ? "map" : "unmap",
-		iova, &phys_addr);
-
-	return 0;
-}
-
-
 int ipa3_request_gsi_channel(struct ipa_request_gsi_channel_params *params,
 			     struct ipa_req_chan_out_params *out_params)
 {
@@ -1982,6 +1905,72 @@ int ipa3_clear_endpoint_delay(u32 clnt_hdl)
 	ipa3_cfg_ep_ctrl(clnt_hdl, &ep_ctrl);
 
 	IPA_ACTIVE_CLIENTS_DEC_EP(ipa3_get_client_mapping(clnt_hdl));
+
+	IPADBG("client (ep: %d) removed ep delay\n", clnt_hdl);
+
+	return 0;
+}
+/**
+ * ipa3_clear_endpoint_delay() - Remove ep delay set on the IPA pipe before
+ * client disconnect.
+ * @clnt_hdl:	[in] opaque client handle assigned by IPA to client
+ *
+ * Should be called by the driver of the peripheral that wants to remove
+ * ep delay on IPA consumer ipe before disconnect in BAM-BAM mode. this api
+ * expects caller to take responsibility to free any needed headers, routing
+ * and filtering tables and rules as needed.
+ *
+ * Returns:	0 on success, negative on failure
+ *
+ * Note:	Should not be called from atomic context
+ */
+int ipa3_clear_endpoint_delay(u32 clnt_hdl)
+{
+	struct ipa3_ep_context *ep;
+	struct ipa_ep_cfg_ctrl ep_ctrl = {0};
+	struct ipa_enable_force_clear_datapath_req_msg_v01 req = {0};
+	int res;
+
+	if (unlikely(!ipa3_ctx)) {
+		IPAERR("IPA driver was not initialized\n");
+		return -EINVAL;
+	}
+
+	if (clnt_hdl >= ipa3_ctx->ipa_num_pipes ||
+		ipa3_ctx->ep[clnt_hdl].valid == 0) {
+		IPAERR("bad parm.\n");
+		return -EINVAL;
+	}
+
+	ep = &ipa3_ctx->ep[clnt_hdl];
+
+	if (!ipa3_ctx->tethered_flow_control) {
+		IPADBG("APPS flow control is not enabled\n");
+		/* Send a message to modem to disable flow control honoring. */
+		req.request_id = clnt_hdl;
+		req.source_pipe_bitmask = 1 << clnt_hdl;
+		res = ipa3_qmi_enable_force_clear_datapath_send(&req);
+		if (res) {
+			IPADBG("enable_force_clear_datapath failed %d\n",
+				res);
+		}
+		ep->qmi_request_sent = true;
+	}
+
+	ipa3_inc_client_enable_clks();
+	/* Set disconnect in progress flag so further flow control events are
+	 * not honored.
+	 */
+	spin_lock(&ipa3_ctx->disconnect_lock);
+	ep->disconnect_in_progress = true;
+	spin_unlock(&ipa3_ctx->disconnect_lock);
+
+	/* If flow is disabled at this point, restore the ep state.*/
+	ep_ctrl.ipa_ep_delay = false;
+	ep_ctrl.ipa_ep_suspend = false;
+	ipa3_cfg_ep_ctrl(clnt_hdl, &ep_ctrl);
+
+	ipa3_dec_client_disable_clks();
 
 	IPADBG("client (ep: %d) removed ep delay\n", clnt_hdl);
 

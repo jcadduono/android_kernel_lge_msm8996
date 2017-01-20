@@ -642,18 +642,11 @@ int sps_bam_reset(struct sps_bam *dev)
 		      pipe_index++) {
 			pipe = dev->pipes[pipe_index];
 			if (BAM_PIPE_IS_ASSIGNED(pipe)) {
-				if (!(dev->props.options &
-							SPS_BAM_FORCE_RESET)) {
-					SPS_ERR(dev,
-						"sps:BAM device %pa RESET failed: pipe %d in use\n",
-						BAM_ID(dev), pipe_index);
-					result = SPS_ERROR;
-					break;
-				}
-
-				SPS_DBG2(dev,
-					"sps: BAM %pa is force reset with pipe %d in use\n",
+				SPS_ERR(dev,
+					"sps:BAM device %pa RESET failed: pipe %d in use\n",
 					BAM_ID(dev), pipe_index);
+				result = SPS_ERROR;
+				break;
 			}
 		}
 

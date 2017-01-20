@@ -160,7 +160,7 @@ static int handle_install_filter_rule_req(void *req_h, void *req)
 			resp.filter_handle_list_len = MAX_NUM_Q6_RULE;
 			IPAWANERR("installed (%d) max Q6-UL rules ",
 			MAX_NUM_Q6_RULE);
-			IPAWANERR("but modem gives total (%u)\n",
+			IPAWANERR("but modem gives total (%d)\n",
 			rule_req->filter_spec_list_len);
 		} else {
 			resp.filter_handle_list_len =
@@ -509,11 +509,16 @@ int qmi_filter_request_send(struct ipa_install_fltr_rule_req_msg_v01 *req)
 	struct msg_desc req_desc, resp_desc;
 	int rc;
 
+	if (!ipa_qmi_ctx) {
+		pr_err("Invalid ipa_qmi_ctx\n");
+		return -EINVAL;
+	}
+
 	/* check if the filter rules from IPACM is valid */
 	if (req->filter_spec_list_len == 0) {
 		IPAWANDBG("IPACM pass zero rules to Q6\n");
 	} else {
-		IPAWANDBG("IPACM pass %u rules to Q6\n",
+		IPAWANDBG("IPACM pass %d rules to Q6\n",
 		req->filter_spec_list_len);
 	}
 
@@ -644,15 +649,15 @@ int qmi_filter_notify_send(struct ipa_fltr_installed_notif_req_msg_v01 *req)
 	struct msg_desc req_desc, resp_desc;
 	int rc = 0, i = 0;
 
+	if (!ipa_qmi_ctx) {
+		pr_err("Invalid ipa_qmi_ctx\n");
+		return -EINVAL;
+	}
+
 	/* check if the filter rules from IPACM is valid */
 	if (req->filter_index_list_len == 0) {
 		IPAWANERR(" delete UL filter rule for pipe %d\n",
 		req->source_pipe_index);
-		return -EINVAL;
-	} else if (req->filter_index_list_len > QMI_IPA_MAX_FILTERS_V01) {
-		IPAWANERR(" UL filter rule for pipe %d exceed max (%u)\n",
-		req->source_pipe_index,
-		req->filter_index_list_len);
 		return -EINVAL;
 	} else if (req->filter_index_list[0].filter_index == 0 &&
 		req->source_pipe_index !=

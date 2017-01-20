@@ -14,7 +14,11 @@
 # Based on the ia64 boot/Makefile.
 #
 
+ifeq ($(CONFIG_MACH_LGE),y)
+include $(srctree)/arch/arm64/boot/dts/lge/Makefile
+else
 include $(srctree)/arch/arm64/boot/dts/qcom/Makefile
+endif
 
 targets := Image Image.gz
 
