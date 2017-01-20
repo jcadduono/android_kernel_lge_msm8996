@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -118,7 +118,12 @@ static void kryo_write_pmresr(int reg, int l_h, u32 val)
 
 static u32 kryo_read_pmresr(int reg, int l_h)
 {
-	u32 val = 0;
+	u32 val;
+
+	if (reg > KRYO_MAX_L1_REG) {
+		pr_err("Invalid read of RESR reg %d\n", reg);
+		return 0;
+	}
 
 	if (l_h == RESR_L) {
 		switch (reg) {
@@ -131,9 +136,6 @@ static u32 kryo_read_pmresr(int reg, int l_h)
 		case 2:
 			asm volatile("mrs %0, " pmresr2l_el0 : "=r" (val));
 			break;
-		default:
-			pr_err("Invalid read of RESR reg %d\n", reg);
-			break;
 		}
 	} else {
 		switch (reg) {
@@ -145,9 +147,6 @@ static u32 kryo_read_pmresr(int reg, int l_h)
 			break;
 		case 2:
 			asm volatile("mrs %0," pmresr2h_el0 : "=r" (val));
-			break;
-		default:
-			pr_err("Invalid read of RESR reg %d\n", reg);
 			break;
 		}
 	}

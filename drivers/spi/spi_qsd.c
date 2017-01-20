@@ -1830,15 +1830,15 @@ err_setup_exit:
 
 static int debugfs_iomem_x32_set(void *data, u64 val)
 {
-	struct msm_spi_debugfs_data *reg = (struct msm_spi_debugfs_data *)data;
-	struct msm_spi *dd = reg->dd;
+	struct msm_spi_regs *debugfs_spi_regs = (struct msm_spi_regs *)data;
+	struct msm_spi *dd = debugfs_spi_regs->dd;
 	int ret;
 
 	ret = pm_runtime_get_sync(dd->dev);
 	if (ret < 0)
 		return ret;
 
-	writel_relaxed(val, (dd->base + reg->offset));
+	writel_relaxed(val, (dd->base + debugfs_spi_regs->offset));
 	/* Ensure the previous write completed. */
 	mb();
 
@@ -1849,14 +1849,14 @@ static int debugfs_iomem_x32_set(void *data, u64 val)
 
 static int debugfs_iomem_x32_get(void *data, u64 *val)
 {
-	struct msm_spi_debugfs_data *reg = (struct msm_spi_debugfs_data *)data;
-	struct msm_spi *dd = reg->dd;
+	struct msm_spi_regs *debugfs_spi_regs = (struct msm_spi_regs *)data;
+	struct msm_spi *dd = debugfs_spi_regs->dd;
 	int ret;
 
 	ret = pm_runtime_get_sync(dd->dev);
 	if (ret < 0)
 		return ret;
-	*val = readl_relaxed(dd->base + reg->offset);
+	*val = readl_relaxed(dd->base + debugfs_spi_regs->offset);
 	/* Ensure the previous read completed. */
 	mb();
 
@@ -1870,21 +1870,18 @@ DEFINE_SIMPLE_ATTRIBUTE(fops_iomem_x32, debugfs_iomem_x32_get,
 
 static void spi_debugfs_init(struct msm_spi *dd)
 {
-	char dir_name[20];
-
-	scnprintf(dir_name, sizeof(dir_name), "%s_dbg", dev_name(dd->dev));
-	dd->dent_spi = debugfs_create_dir(dir_name, NULL);
+	dd->dent_spi = debugfs_create_dir(dev_name(dd->dev), NULL);
 	if (dd->dent_spi) {
 		int i;
 
 		for (i = 0; i < ARRAY_SIZE(debugfs_spi_regs); i++) {
-			dd->reg_data[i].offset = debugfs_spi_regs[i].offset;
-			dd->reg_data[i].dd = dd;
+			debugfs_spi_regs[i].dd = dd;
 			dd->debugfs_spi_regs[i] =
 			   debugfs_create_file(
 			       debugfs_spi_regs[i].name,
 			       debugfs_spi_regs[i].mode,
-			       dd->dent_spi, &dd->reg_data[i],
+			       dd->dent_spi,
+			       debugfs_spi_regs+i,
 			       &fops_iomem_x32);
 		}
 	}
@@ -2675,6 +2672,7 @@ static int msm_spi_suspend(struct device *device)
 		struct platform_device *pdev = to_platform_device(device);
 		struct spi_master *master = platform_get_drvdata(pdev);
 		struct msm_spi   *dd;
+		int ret;
 
 		dev_dbg(device, "system suspend");
 		if (!master)
@@ -2682,6 +2680,11 @@ static int msm_spi_suspend(struct device *device)
 		dd = spi_master_get_devdata(master);
 		if (!dd)
 			goto suspend_exit;
+
+		ret = spi_master_suspend(master);
+		if (ret)
+			return ret;
+
 		msm_spi_pm_suspend_runtime(device);
 
 		/*
@@ -2702,8 +2705,14 @@ static int msm_spi_resume(struct device *device)
 	 * Even if it's not enabled, rely on 1st client transaction to do
 	 * clock ON and gpio configuration
 	 */
+	struct spi_master *master = dev_get_drvdata(device);
+
 	dev_dbg(device, "system resume");
-	return 0;
+
+	if (!master)
+		return -ENODEV;
+
+	return spi_master_resume(master);
 }
 #else
 #define msm_spi_suspend NULL
@@ -2739,6 +2748,7 @@ static struct of_device_id msm_spi_dt_match[] = {
 	},
 	{}
 };
+
 
 static const struct dev_pm_ops msm_spi_dev_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(msm_spi_suspend, msm_spi_resume)

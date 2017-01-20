@@ -138,7 +138,6 @@ static int cpe_debug_mode;
 #define DAPM_MICBIAS3_STANDALONE "MIC BIAS3 Standalone"
 #define DAPM_MICBIAS4_STANDALONE "MIC BIAS4 Standalone"
 
-#define DAPM_LDO_H_STANDALONE "LDO_H"
 module_param(cpe_debug_mode, int,
 	     S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(cpe_debug_mode, "boot cpe in debug mode");
@@ -764,7 +763,7 @@ struct tasha_priv {
 	struct wcd_swr_ctrl_platform_data swr_plat_data;
 
 	/* Port values for Rx and Tx codec_dai */
-	unsigned int rx_port_value[TASHA_RX_MAX];
+	unsigned int rx_port_value;
 	unsigned int tx_port_value;
 
 	unsigned int vi_feed_value;
@@ -1302,8 +1301,15 @@ static void tasha_mbhc_hph_l_pull_up_control(struct snd_soc_codec *codec,
 		__func__, pull_up_cur);
 
 	if (TASHA_IS_2_0(tasha->wcd9xxx->version))
+	{
+#ifdef CONFIG_SND_SOC_ES9018
+		snd_soc_update_bits(codec, WCD9335_MBHC_PLUG_DETECT_CTL,
+			    0xC0, 0xC0);
+#else
 		snd_soc_update_bits(codec, WCD9335_MBHC_PLUG_DETECT_CTL,
 			    0xC0, pull_up_cur << 6);
+#endif
+	}
 	else
 		snd_soc_update_bits(codec, WCD9335_MBHC_PLUG_DETECT_CTL,
 			    0xC0, 0x40);
@@ -1763,6 +1769,22 @@ static void tasha_wcd_mbhc_calc_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 	int zMono, z_diff1, z_diff2;
 	bool is_fsm_disable = false;
 	bool is_change = false;
+
+#ifdef CONFIG_SND_SOC_ES9018
+    struct tasha_mbhc_zdet_param zdet_param[] = {
+        {4, 0, 4, 0x08, 0x14, 0x18}, /* < 32ohm */
+        {2, 0, 3, 0x18, 0x7C, 0x90}, /* 32ohm < Z < 400ohm */
+        {2, 0, 3, 0x18, 0x7C, 0x90}, /* 400ohm < Z < 1200ohm */
+        {2, 0, 3, 0x18, 0x7C, 0x90}, /* >1200ohm */
+    };
+    struct tasha_mbhc_zdet_param *zdet_param_ptr = NULL;
+    s16 d1_a[][4] = {
+        {0, 30, 90, 30},
+        {0, 30, 30, 5},
+        {0, 30, 30, 5},
+        {0, 30, 30, 5},
+    };
+#else
 	struct tasha_mbhc_zdet_param zdet_param[] = {
 		{4, 0, 4, 0x08, 0x14, 0x18}, /* < 32ohm */
 		{2, 0, 3, 0x18, 0x7C, 0x90}, /* 32ohm < Z < 400ohm */
@@ -1776,6 +1798,7 @@ static void tasha_wcd_mbhc_calc_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 		{0, 30, 30, 5},
 		{0, 30, 30, 5},
 	};
+#endif
 	s16 *d1 = NULL;
 
 	if (!TASHA_IS_2_0(wcd9xxx->version)) {
@@ -2377,8 +2400,7 @@ static int slim_rx_mux_get(struct snd_kcontrol *kcontrol,
 	struct snd_soc_codec *codec = widget->codec;
 	struct tasha_priv *tasha_p = snd_soc_codec_get_drvdata(codec);
 
-	ucontrol->value.enumerated.item[0] =
-			tasha_p->rx_port_value[widget->shift];
+	ucontrol->value.enumerated.item[0] = tasha_p->rx_port_value;
 	return 0;
 }
 
@@ -2397,27 +2419,25 @@ static int slim_rx_mux_put(struct snd_kcontrol *kcontrol,
 	struct wcd9xxx *core = dev_get_drvdata(codec->dev->parent);
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
 	struct snd_soc_dapm_update *update = NULL;
-	unsigned int rx_port_value;
 	u32 port_id = widget->shift;
 
-	tasha_p->rx_port_value[port_id] = ucontrol->value.enumerated.item[0];
-	rx_port_value = tasha_p->rx_port_value[port_id];
-
 	pr_debug("%s: wname %s cname %s value %u shift %d item %ld\n", __func__,
-		widget->name, ucontrol->id.name, rx_port_value,
+		widget->name, ucontrol->id.name, tasha_p->rx_port_value,
 		widget->shift, ucontrol->value.integer.value[0]);
+
+	tasha_p->rx_port_value = ucontrol->value.enumerated.item[0];
 
 	mutex_lock(&codec->mutex);
 
 	if (tasha_p->intf_type != WCD9XXX_INTERFACE_TYPE_SLIMBUS) {
-		if (rx_port_value > 2) {
+		if (tasha_p->rx_port_value > 2) {
 			dev_err(codec->dev, "%s: invalid AIF for I2C mode\n",
 				__func__);
 			goto err;
 		}
 	}
 	/* value need to match the Virtual port and AIF number */
-	switch (rx_port_value) {
+	switch (tasha_p->rx_port_value) {
 	case 0:
 		list_del_init(&core->rx_chs[port_id].list);
 		break;
@@ -2477,13 +2497,13 @@ static int slim_rx_mux_put(struct snd_kcontrol *kcontrol,
 			      &tasha_p->dai[AIF_MIX1_PB].wcd9xxx_ch_list);
 		break;
 	default:
-		pr_err("Unknown AIF %d\n", rx_port_value);
+		pr_err("Unknown AIF %d\n", tasha_p->rx_port_value);
 		goto err;
 	}
 rtn:
 	mutex_unlock(&codec->mutex);
 	snd_soc_dapm_mux_update_power(widget->dapm, kcontrol,
-					rx_port_value, e, update);
+					tasha_p->rx_port_value, e, update);
 
 	return 0;
 err:
@@ -5865,55 +5885,6 @@ static int __tasha_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static int tasha_codec_ldo_h_control(struct snd_soc_dapm_widget *w,
-				     int event)
-{
-	struct snd_soc_codec *codec = w->codec;
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	if (SND_SOC_DAPM_EVENT_ON(event)) {
-		tasha->ldo_h_users++;
-
-		if (tasha->ldo_h_users == 1)
-			snd_soc_update_bits(codec, WCD9335_LDOH_MODE,
-					    0x80, 0x80);
-	}
-
-	if (SND_SOC_DAPM_EVENT_OFF(event)) {
-		tasha->ldo_h_users--;
-
-		if (tasha->ldo_h_users < 0)
-			tasha->ldo_h_users = 0;
-
-		if (tasha->ldo_h_users == 0)
-			snd_soc_update_bits(codec, WCD9335_LDOH_MODE,
-					    0x80, 0x00);
-	}
-
-	return 0;
-}
-
-static int tasha_codec_force_enable_ldo_h(struct snd_soc_dapm_widget *w,
-					  struct snd_kcontrol *kcontrol,
-					  int event)
-{
-	struct snd_soc_codec *codec = w->codec;
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
-
-	switch (event) {
-	case SND_SOC_DAPM_PRE_PMU:
-		wcd_resmgr_enable_master_bias(tasha->resmgr);
-		tasha_codec_ldo_h_control(w, event);
-		break;
-	case SND_SOC_DAPM_POST_PMD:
-		tasha_codec_ldo_h_control(w, event);
-		wcd_resmgr_disable_master_bias(tasha->resmgr);
-		break;
-	}
-
-	return 0;
-}
-
 static int tasha_codec_force_enable_micbias(struct snd_soc_dapm_widget *w,
 					    struct snd_kcontrol *kcontrol,
 					    int event)
@@ -5944,27 +5915,6 @@ static int tasha_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *kcontrol, int event)
 {
 	return __tasha_codec_enable_micbias(w, event);
-}
-
-static int tasha_codec_enable_standalone_ldo_h(struct snd_soc_codec *codec,
-					       bool enable)
-{
-	int rc;
-
-	if (enable)
-		rc = snd_soc_dapm_force_enable_pin(&codec->dapm,
-						   DAPM_LDO_H_STANDALONE);
-	else
-		rc = snd_soc_dapm_disable_pin(&codec->dapm,
-					      DAPM_LDO_H_STANDALONE);
-
-	if (!rc)
-		snd_soc_dapm_sync(&codec->dapm);
-	else
-		dev_err(codec->dev, "%s: ldo_h force %s pin failed\n",
-			__func__, (enable ? "enable" : "disable"));
-
-	return rc;
 }
 
 /*
@@ -6265,10 +6215,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX0 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX0 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX0 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX0 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX0 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX0 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX0 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX1 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX1 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6279,10 +6231,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX1 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX1 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX1 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX1 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX1 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX1 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX1 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX2 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX2 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6293,10 +6247,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX2 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX2 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX2 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX2 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX2 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX2 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX2 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX3 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX3 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6307,10 +6263,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX3 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX3 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX3 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX3 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX3 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX3 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX3 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX4 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX4 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6321,10 +6279,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX4 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX4 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX4 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX4 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX4 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX4 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX4 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX5 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX5 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6335,10 +6295,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX5 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX5 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX5 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX5 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX5 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX5 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX5 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX6 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX6 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6349,10 +6311,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX6 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX6 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX6 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX6 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX6 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX6 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX6 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX7 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX7 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6363,10 +6327,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX7 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX7 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX7 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX7 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX7 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX7 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX7 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"RX MIX TX8 MUX", "RX_MIX0", "RX INT0 SEC MIX"},
 	{"RX MIX TX8 MUX", "RX_MIX1", "RX INT1 SEC MIX"},
@@ -6377,10 +6343,12 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX MIX TX8 MUX", "RX_MIX6", "RX INT6 SEC MIX"},
 	{"RX MIX TX8 MUX", "RX_MIX7", "RX INT7 SEC MIX"},
 	{"RX MIX TX8 MUX", "RX_MIX8", "RX INT8 SEC MIX"},
+#ifndef CONFIG_MACH_LGE
 	{"RX MIX TX8 MUX", "RX_MIX_VBAT5", "RX INT5 VBAT"},
 	{"RX MIX TX8 MUX", "RX_MIX_VBAT6", "RX INT6 VBAT"},
 	{"RX MIX TX8 MUX", "RX_MIX_VBAT7", "RX INT7 VBAT"},
 	{"RX MIX TX8 MUX", "RX_MIX_VBAT8", "RX INT8 VBAT"},
+#endif
 
 	{"ADC US MUX0", "US_Switch", "ADC MUX0"},
 	{"ADC US MUX1", "US_Switch", "ADC MUX1"},
@@ -6730,8 +6698,10 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX INT5 MIX2", NULL, "RX INT5 SEC MIX"},
 	{"RX INT5 INTERP", NULL, "RX INT5 MIX2"},
 
+#ifndef CONFIG_MACH_LGE
 	{"RX INT5 VBAT", "LO3 VBAT Enable", "RX INT5 INTERP"},
 	{"RX INT5 DAC", NULL, "RX INT5 VBAT"},
+#endif
 
 	{"RX INT5 DAC", NULL, "RX INT5 INTERP"},
 	{"RX INT5 DAC", NULL, "RX_BIAS"},
@@ -6745,8 +6715,10 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX INT6 MIX2", NULL, "RX INT6 SEC MIX"},
 	{"RX INT6 INTERP", NULL, "RX INT6 MIX2"},
 
+#ifndef CONFIG_MACH_LGE
 	{"RX INT6 VBAT", "LO4 VBAT Enable", "RX INT6 INTERP"},
 	{"RX INT6 DAC", NULL, "RX INT6 VBAT"},
+#endif
 
 	{"RX INT6 DAC", NULL, "RX INT6 INTERP"},
 	{"RX INT6 DAC", NULL, "RX_BIAS"},
@@ -6762,8 +6734,10 @@ static const struct snd_soc_dapm_route audio_map[] = {
 
 	{"RX INT7 INTERP", NULL, "RX INT7 MIX2"},
 
+#ifndef CONFIG_MACH_LGE
 	{"RX INT7 VBAT", "SPKRL VBAT Enable", "RX INT7 INTERP"},
 	{"RX INT7 CHAIN", NULL, "RX INT7 VBAT"},
+#endif
 
 	{"RX INT7 CHAIN", NULL, "RX INT7 INTERP"},
 	{"RX INT7 CHAIN", NULL, "RX_BIAS"},
@@ -6775,8 +6749,10 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"RX INT8 SEC MIX", NULL, "RX INT8 SPLINE MIX"},
 	{"RX INT8 INTERP", NULL, "RX INT8 SEC MIX"},
 
+#ifndef CONFIG_MACH_LGE
 	{"RX INT8 VBAT", "SPKRR VBAT Enable", "RX INT8 INTERP"},
 	{"RX INT8 CHAIN", NULL, "RX INT8 VBAT"},
+#endif
 
 	{"RX INT8 CHAIN", NULL, "RX INT8 INTERP"},
 	{"RX INT8 CHAIN", NULL, "RX_BIAS"},
@@ -7486,9 +7462,15 @@ static int tasha_rx_hph_mode_put(struct snd_kcontrol *kcontrol,
 		__func__, mode_val);
 
 	if (mode_val == 0) {
+#if 0 //qct org
 		dev_warn(codec->dev, "%s:Invalid HPH Mode, default to Cls-H HiFi\n",
 			__func__);
 		mode_val = CLS_H_HIFI;
+#else //LG modification, LG default mode is set to CLS_H_LP
+		dev_warn(codec->dev, "%s:Invalid HPH Mode, default to Cls-H LowPower\n",
+			__func__);
+		mode_val = CLS_H_LP;
+#endif
 	}
 	tasha->hph_mode = mode_val;
 	return 0;
@@ -7503,34 +7485,6 @@ static const char *const tasha_conn_mad_text[] = {
 static const struct soc_enum tasha_conn_mad_enum =
 	SOC_ENUM_SINGLE_EXT(ARRAY_SIZE(tasha_conn_mad_text),
 			    tasha_conn_mad_text);
-
-static int tasha_enable_ldo_h_get(struct snd_kcontrol *kcontrol,
-				  struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	u8 val = 0;
-
-	if (codec)
-		val = snd_soc_read(codec, WCD9335_LDOH_MODE) & 0x80;
-
-	ucontrol->value.integer.value[0] = !!val;
-
-	return 0;
-}
-
-static int tasha_enable_ldo_h_put(struct snd_kcontrol *kcontrol,
-				  struct snd_ctl_elem_value *ucontrol)
-{
-	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
-	int value = ucontrol->value.integer.value[0];
-	bool enable;
-
-	enable = !!value;
-	if (codec)
-		tasha_codec_enable_standalone_ldo_h(codec, enable);
-
-	return 0;
-}
 
 static int tasha_mad_input_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -7740,6 +7694,41 @@ static int tasha_pinctl_mode_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int tasha_rx7_half_db_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+
+	ucontrol->value.integer.value[0] =
+		((snd_soc_read(codec, WCD9335_CDC_RX7_RX_PATH_SEC1) & 0x01) ?
+		  1 : 0);
+
+	dev_dbg(codec->dev, "%s: value: %lu\n", __func__,
+		ucontrol->value.integer.value[0]);
+
+	return 0;
+}
+
+static int tasha_rx7_half_db_put(struct snd_kcontrol *kcontrol,
+					struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+
+	dev_dbg(codec->dev, "%s: value: %lu\n", __func__,
+		ucontrol->value.integer.value[0]);
+
+	/* Set half db register configuration */
+	if (ucontrol->value.integer.value[0])
+		snd_soc_update_bits(codec, WCD9335_CDC_RX7_RX_PATH_SEC1,
+						0x01, 0x01);
+	else
+		snd_soc_update_bits(codec, WCD9335_CDC_RX7_RX_PATH_SEC1,
+						0x01, 0x00);
+
+	return 0;
+}
+
+#ifndef CONFIG_MACH_LGE
 static void wcd_vbat_adc_out_config_2_0(struct wcd_vbat *vbat,
 					struct snd_soc_codec *codec)
 {
@@ -8065,6 +8054,7 @@ static int tasha_codec_vbat_enable_event(struct snd_soc_dapm_widget *w,
 
 	return ret;
 }
+#endif
 
 static const char * const rx_hph_mode_mux_text[] = {
 	"CLS_H_INVALID", "CLS_H_HIFI", "CLS_H_LP", "CLS_AB", "CLS_H_LOHIFI"
@@ -8275,8 +8265,6 @@ static const struct snd_kcontrol_new tasha_snd_controls[] = {
 
 	SOC_ENUM_EXT("MAD Input", tasha_conn_mad_enum,
 		     tasha_mad_input_get, tasha_mad_input_put),
-	SOC_SINGLE_EXT("LDO_H Enable", SND_SOC_NOPM, 0, 1, 0,
-			tasha_enable_ldo_h_get, tasha_enable_ldo_h_put),
 
 	SOC_SINGLE_EXT("DMIC1_CLK_PIN_MODE", SND_SOC_NOPM, 17, 1, 0,
 		       tasha_pinctl_mode_get, tasha_pinctl_mode_put),
@@ -8302,12 +8290,18 @@ static const struct snd_kcontrol_new tasha_snd_controls[] = {
 	SOC_ENUM_EXT("AMIC_5_6 PWR MODE", amic_pwr_lvl_enum,
 		       tasha_amic_pwr_lvl_get, tasha_amic_pwr_lvl_put),
 
+	SOC_SINGLE_EXT("RX7 Half DB Enable", SND_SOC_NOPM, 0, 1, 0,
+		       tasha_rx7_half_db_get,
+			   tasha_rx7_half_db_put),
+
+#ifndef CONFIG_MACH_LGE
 	SOC_SINGLE_MULTI_EXT("Vbat ADC data", SND_SOC_NOPM, 0, 0xFFFF, 0, 2,
 			tasha_vbat_adc_data_get, NULL),
 
 	SOC_ENUM_EXT("GSM mode Enable", tasha_vbat_gsm_mode_enum,
 			tasha_vbat_gsm_mode_func_get,
 			tasha_vbat_gsm_mode_func_put),
+#endif
 };
 
 static int tasha_put_dec_enum(struct snd_kcontrol *kcontrol,
@@ -10189,6 +10183,7 @@ static const struct snd_soc_dapm_widget tasha_dapm_widgets[] = {
 			NULL, 0, tasha_codec_spk_boost_event,
 			SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
+#ifndef CONFIG_MACH_LGE
 	SND_SOC_DAPM_MIXER_E("RX INT5 VBAT", SND_SOC_NOPM, 0, 0,
 			rx_int5_vbat_mix_switch,
 			ARRAY_SIZE(rx_int5_vbat_mix_switch),
@@ -10209,6 +10204,7 @@ static const struct snd_soc_dapm_widget tasha_dapm_widgets[] = {
 			ARRAY_SIZE(rx_int8_vbat_mix_switch),
 			tasha_codec_vbat_enable_event,
 			SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+#endif
 
 	SND_SOC_DAPM_MUX("RX INT0 MIX2 INP", WCD9335_CDC_RX0_RX_PATH_CFG1, 4,
 			   0, &rx_int0_mix2_inp_mux),
@@ -10428,9 +10424,6 @@ static const struct snd_soc_dapm_widget tasha_dapm_widgets[] = {
 	SND_SOC_DAPM_MICBIAS_E(DAPM_MICBIAS4_STANDALONE, SND_SOC_NOPM, 0, 0,
 			       tasha_codec_force_enable_micbias,
 			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
-	SND_SOC_DAPM_SUPPLY(DAPM_LDO_H_STANDALONE, SND_SOC_NOPM, 0, 0,
-			    tasha_codec_force_enable_ldo_h,
-			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
 	SND_SOC_DAPM_MUX("ANC0 FB MUX", SND_SOC_NOPM, 0, 0, &anc0_fb_mux),
 	SND_SOC_DAPM_MUX("ANC1 FB MUX", SND_SOC_NOPM, 0, 0, &anc1_fb_mux),
@@ -12018,7 +12011,7 @@ static const struct tasha_reg_mask_val tasha_codec_reg_init_common_val[] = {
 	{WCD9335_CDC_CLSH_K2_MSB, 0x0F, 0x00},
 	{WCD9335_CDC_CLSH_K2_LSB, 0xFF, 0x60},
 	{WCD9335_CPE_SS_DMIC_CFG, 0x80, 0x00},
-	{WCD9335_CDC_BOOST0_BOOST_CTL, 0x70, 0x50},
+	{WCD9335_CDC_BOOST0_BOOST_CTL, 0x7C, 0x58},
 	{WCD9335_CDC_BOOST1_BOOST_CTL, 0x70, 0x50},
 	{WCD9335_CDC_RX7_RX_PATH_CFG1, 0x08, 0x08},
 	{WCD9335_CDC_RX8_RX_PATH_CFG1, 0x08, 0x08},
@@ -12963,6 +12956,13 @@ static int tasha_post_reset_cb(struct wcd9xxx *wcd9xxx)
 
 	/* Class-H Init*/
 	wcd_clsh_init(&tasha->clsh_d);
+#if 0
+	/* Default HPH Mode to Class-H HiFi */
+	tasha->hph_mode = CLS_H_HIFI;
+#else //LG modification, LG default mode is set to CLS_H_LP
+	/* Default HPH Mode to Class-H LowPower */
+	tasha->hph_mode = CLS_H_LP;
+#endif
 
 	for (i = 0; i < TASHA_MAX_MICBIAS; i++)
 		tasha->micb_ref[i] = 0;
@@ -13074,8 +13074,13 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	}
 	/* Class-H Init*/
 	wcd_clsh_init(&tasha->clsh_d);
+#if 0
 	/* Default HPH Mode to Class-H HiFi */
 	tasha->hph_mode = CLS_H_HIFI;
+#else //LG modification, LG default mode is set to CLS_H_LP
+	/* Default HPH Mode to Class-H LowPower */
+	tasha->hph_mode = CLS_H_LP;
+#endif
 
 	tasha->codec = codec;
 	for (i = 0; i < COMPANDER_MAX; i++)
@@ -13522,7 +13527,7 @@ static int tasha_swrm_clock(void *handle, bool enable)
 					0x10, 0x10);
 		}
 	}
-	dev_dbg(tasha->dev, "%s: swrm clock users %d\n",
+	dev_info(tasha->dev, "%s: swrm clock users %d\n",
 		__func__, tasha->swr_clk_users);
 	mutex_unlock(&tasha->swr_clk_lock);
 	return 0;
@@ -13772,6 +13777,7 @@ static int tasha_probe(struct platform_device *pdev)
 	/* Register for Clock */
 	wcd_ext_clk = clk_get(tasha->wcd9xxx->dev, "wcd_clk");
 	if (IS_ERR(wcd_ext_clk)) {
+		ret = PTR_ERR(wcd_ext_clk); //LGE_UPDATE tasha_probe should not return 0 in case of ext_clk fail.
 		dev_err(tasha->wcd9xxx->dev, "%s: clk get %s failed\n",
 			__func__, "wcd_ext_clk");
 		goto err_clk;

@@ -545,7 +545,7 @@
 	};
 
 	sound-9335 {
-		qcom,model = "msm8996-tasha-sbc-snd-card";
+		qcom,model = "msm8996-tasha-db-snd-card";
 
 		qcom,audio-routing =
 			"RX_BIAS", "MCLK",
@@ -837,13 +837,13 @@
 
 &cam_sensor_mclk1_active { /* MCLK1 */
 	config {
-		drive-strength = <4>; /* 4 MA */
+		drive-strength = <8>; /* 8 MA */
 	};
 };
 
 &cam_sensor_mclk1_suspend { /* MCLK1 */
 	config {
-		drive-strength = <4>; /* 4 MA */
+		drive-strength = <8>; /* 8 MA */
 	};
 };
 
@@ -857,10 +857,4 @@
 	config {
 		drive-strength = <8>; /* 8 MA */
 	};
-};
-
-&wil6210 {
-	status = "ok";
-	/delete-property/ qcom,wigig-en;
-	/delete-property/ qcom,sleep-clk-en;
 };

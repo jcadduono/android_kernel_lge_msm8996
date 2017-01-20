@@ -162,7 +162,6 @@ static int ngd_qmi_available(struct notifier_block *n, unsigned long code,
 	SLIM_INFO(dev, "Slimbus QMI NGD CB received event:%ld\n", code);
 	switch (code) {
 	case QMI_SERVER_ARRIVE:
-		atomic_set(&dev->ssr_in_progress, 0);
 		schedule_work(&qmi->ssr_up);
 		break;
 	default:
@@ -181,7 +180,6 @@ static int dsp_ssr_notify_cb(struct notifier_block *n, unsigned long code,
 	switch (code) {
 	case SUBSYS_BEFORE_SHUTDOWN:
 		SLIM_INFO(dev, "SLIM DSP SSR notify cb:%lu\n", code);
-		atomic_set(&dev->ssr_in_progress, 1);
 		/* wait for current transaction */
 		mutex_lock(&dev->tx_lock);
 		/* make sure autosuspend is not called until ADSP comes up*/
@@ -797,7 +795,7 @@ static int ngd_bulk_wr(struct slim_controller *ctrl, u8 la, u8 mt, u8 mc,
 	}
 	if (dev->bulk.size > dev->bulk.buf_sz) {
 		void *temp = krealloc(dev->bulk.base, dev->bulk.size,
-				      GFP_KERNEL | GFP_DMA);
+				      GFP_KERNEL);
 		if (!temp) {
 			ret = -ENOMEM;
 			goto retpath;
@@ -1112,6 +1110,8 @@ static void ngd_slim_setup(struct msm_slim_ctrl *dev)
 			NGD_BASE(dev->ctrl.nr,
 			dev->ver) + NGD_STATUS, true);
 	} else {
+		SLIM_WARN(dev, "RX msgq status HW:0x%x, SW:%d:", cfg,
+				  dev->use_rx_msgqs);
 		if (dev->use_rx_msgqs == MSM_MSGQ_DISABLED)
 			goto setup_tx_msg_path;
 		if (cfg & NGD_CFG_RX_MSGQ_EN) {
@@ -1249,13 +1249,14 @@ hw_init_retry:
 		if (ret) {
 			SLIM_WARN(dev, "SLIM power req failed:%d, retry:%d\n",
 					ret, retries);
-			if (!atomic_read(&dev->ssr_in_progress))
-				msm_slim_qmi_power_request(dev, false);
-			if (retries < INIT_MX_RETRIES &&
-				!atomic_read(&dev->ssr_in_progress)) {
+			msm_slim_qmi_power_request(dev, false);
+			if (retries < INIT_MX_RETRIES) {
 				retries++;
 				goto hw_init_retry;
 			}
+
+			panic("[LGE_BSP_AUDIO]SLIM power req failed all 3 times... reboot");
+
 			return ret;
 		}
 	}
@@ -1326,8 +1327,7 @@ capability_retry:
 		SLIM_WARN(dev,
 			  "slim capability time-out:%d, stat:0x%x,cfg:0x%x\n",
 				retries, laddr, cfg);
-		if ((retries < INIT_MX_RETRIES) &&
-				!atomic_read(&dev->ssr_in_progress)) {
+		if (retries < INIT_MX_RETRIES) {
 			retries++;
 			goto capability_retry;
 		}
@@ -1593,7 +1593,7 @@ static int ngd_slim_probe(struct platform_device *pdev)
 
 	/* typical txn numbers and size used in bulk operation */
 	dev->bulk.buf_sz = SLIM_MAX_TXNS * 8;
-	dev->bulk.base = kzalloc(dev->bulk.buf_sz, GFP_KERNEL | GFP_DMA);
+	dev->bulk.base = kzalloc(dev->bulk.buf_sz, GFP_KERNEL);
 	if (!dev->bulk.base) {
 		ret = -ENOMEM;
 		goto err_nobulk;
@@ -1604,6 +1604,7 @@ static int ngd_slim_probe(struct platform_device *pdev)
 	slim_set_ctrldata(&dev->ctrl, dev);
 
 	/* Create IPC log context */
+#ifdef CONFIG_IPC_LOGGING
 	dev->ipc_slimbus_log = ipc_log_context_create(IPC_SLIMBUS_LOG_PAGES,
 						dev_name(dev->dev), 0);
 	if (!dev->ipc_slimbus_log)
@@ -1615,6 +1616,9 @@ static int ngd_slim_probe(struct platform_device *pdev)
 		SLIM_INFO(dev, "start logging for slim dev %s\n",
 				dev_name(dev->dev));
 	}
+#else
+	dev->ipc_slimbus_log = NULL;
+#endif
 	ret = sysfs_create_file(&dev->dev->kobj, &dev_attr_debug_mask.attr);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to create dev. attr\n");
@@ -1690,7 +1694,6 @@ static int ngd_slim_probe(struct platform_device *pdev)
 	dev->ee = 1;
 	dev->irq = irq->start;
 	dev->bam.irq = bam_irq->start;
-	atomic_set(&dev->ssr_in_progress, 0);
 
 	if (rxreg_access)
 		dev->use_rx_msgqs = MSM_MSGQ_DISABLED;
@@ -1862,7 +1865,6 @@ static int ngd_slim_runtime_resume(struct device *device)
 	struct platform_device *pdev = to_platform_device(device);
 	struct msm_slim_ctrl *dev = platform_get_drvdata(pdev);
 	int ret = 0;
-
 	mutex_lock(&dev->tx_lock);
 	if (dev->state >= MSM_CTRL_ASLEEP)
 		ret = ngd_slim_power_up(dev, false);

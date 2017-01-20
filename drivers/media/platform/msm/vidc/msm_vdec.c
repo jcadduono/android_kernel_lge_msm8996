@@ -1202,6 +1202,8 @@ exit:
 	return rc;
 }
 
+
+
 static int set_default_properties(struct msm_vidc_inst *inst)
 {
 	struct hfi_device *hdev;

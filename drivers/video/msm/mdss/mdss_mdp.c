@@ -1713,10 +1713,8 @@ static int mdss_mdp_debug_init(struct platform_device *pdev,
 	mdss_debug_register_dump_range(pdev, dbg_blk, "qcom,regs-dump-mdp",
 		"qcom,regs-dump-names-mdp", "qcom,regs-dump-xin-id-mdp");
 
-	if (mdata->vbif_io.base)
-		mdss_debug_register_io("vbif", &mdata->vbif_io, NULL);
-	if (mdata->vbif_nrt_io.base)
-		mdss_debug_register_io("vbif_nrt", &mdata->vbif_nrt_io, NULL);
+	mdss_debug_register_io("vbif", &mdata->vbif_io, NULL);
+	mdss_debug_register_io("vbif_nrt", &mdata->vbif_nrt_io, NULL);
 
 	return 0;
 }
@@ -2259,12 +2257,12 @@ static void __update_sspp_info(struct mdss_mdp_pipe *pipe,
 #define SPRINT(fmt, ...) \
 		(*cnt += scnprintf(buf + *cnt, len - *cnt, fmt, ##__VA_ARGS__))
 
-	for (i = 0; i < pipe_cnt && pipe; i++) {
+	for (i = 0; i < pipe_cnt; i++) {
 		SPRINT("pipe_num:%d pipe_type:%s pipe_ndx:%d rects:%d pipe_is_handoff:%d display_id:%d ",
 			pipe->num, type, pipe->ndx, pipe->multirect.max_rects,
 			pipe->is_handed_off, mdss_mdp_get_display_id(pipe));
 		SPRINT("fmts_supported:");
-		for (j = 0; j < num_bytes; j++)
+		for (j = 0; j < num_bytes && pipe; j++)
 			SPRINT("%d,", pipe->supported_formats[j]);
 		SPRINT("\n");
 		pipe += pipe->multirect.max_rects;
@@ -2465,9 +2463,105 @@ static DEVICE_ATTR(caps, S_IRUGO, mdss_mdp_show_capabilities, NULL);
 static DEVICE_ATTR(bw_mode_bitmap, S_IRUGO | S_IWUSR | S_IWGRP,
 		mdss_mdp_read_max_limit_bw, mdss_mdp_store_max_limit_bw);
 
+#ifdef CONFIG_LGE_VSYNC_SKIP
+static ssize_t fps_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	ulong fps;
+
+	if (!count)
+		return -EINVAL;
+
+	fps = simple_strtoul(buf, NULL, 10);
+
+	if (fps == 0 || fps >= 60) {
+		mdss_res->enable_skip_vsync = 0;
+		mdss_res->skip_value = 0;
+		mdss_res->weight = 0;
+		mdss_res->bucket = 0;
+		mdss_res->skip_count = 0;
+		mdss_res->skip_ratio = 60;
+		mdss_res->skip_first = false;
+		pr_debug("Disable frame skip.\n");
+	} else {
+		mdss_res->enable_skip_vsync = 1;
+		mdss_res->skip_value = (60<<16)/fps;
+		mdss_res->weight = (1<<16);
+		mdss_res->bucket = 0;
+		mdss_res->skip_ratio = fps;
+		mdss_res->skip_first = false;
+		pr_debug("Enable frame skip: Set to %lu fps.\n", fps);
+	}
+	return count;
+}
+
+static ssize_t fps_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int r = 0;
+	r = snprintf(buf, PAGE_SIZE, "enable_skip_vsync=%d\nweight=%lu\n"
+		     "skip_value=%lu\nbucket=%lu\nskip_count=%lu\n",
+	mdss_res->enable_skip_vsync,
+	mdss_res->weight,
+	mdss_res->skip_value,
+	mdss_res->bucket,
+	mdss_res->skip_count);
+	return r;
+}
+
+static ssize_t fps_ratio_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int r = 0;
+	r = snprintf(buf, PAGE_SIZE, "%d 60\n", mdss_res->skip_ratio);
+	return r;
+}
+
+int fps_cnt_before = 0;
+extern struct fb_info *msm_fb_get_cmd_pan_fb(void);
+
+static ssize_t fps_fcnt_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	int r = 0;
+	struct msm_fb_data_type* mfd;
+	struct mdss_mdp_ctl *ctl;
+	struct fb_info *cmd_pn_info;
+
+	cmd_pn_info = msm_fb_get_cmd_pan_fb();
+	if ( cmd_pn_info->par == NULL )
+		goto read_fail;
+
+	mfd = cmd_pn_info->par;
+	if ( mfd == NULL )
+		goto read_fail;
+
+	ctl = mfd_to_ctl(mfd);
+	if ( ctl == NULL )
+		goto read_fail;
+
+	r = snprintf(buf, PAGE_SIZE, "%d\n", ctl->play_cnt-fps_cnt_before);
+	fps_cnt_before = ctl->play_cnt;
+	return r;
+
+read_fail:
+	fps_cnt_before = 0;
+	r = snprintf(buf,PAGE_SIZE, "0\n");
+	return r;
+}
+
+static DEVICE_ATTR(vfps, 0644, fps_show, fps_store);
+static DEVICE_ATTR(vfps_ratio, 0644, fps_ratio_show, NULL);
+static DEVICE_ATTR(vfps_fcnt, 0644, fps_fcnt_show, NULL);
+#endif
 static struct attribute *mdp_fs_attrs[] = {
 	&dev_attr_caps.attr,
 	&dev_attr_bw_mode_bitmap.attr,
+#ifdef CONFIG_LGE_VSYNC_SKIP
+	&dev_attr_vfps.attr,
+	&dev_attr_vfps_ratio.attr,
+	&dev_attr_vfps_fcnt.attr,
+#endif
 	NULL
 };
 
@@ -3217,34 +3311,28 @@ static int mdss_mdp_parse_dt_pipe(struct platform_device *pdev)
 	mdss_mdp_parse_dt_handler(pdev, "qcom,mdss-pipe-sw-reset-off",
 		&sw_reset_offset, 1);
 	if (sw_reset_offset) {
-		if (mdata->vig_pipes)
-			mdss_mdp_parse_dt_pipe_sw_reset(pdev, sw_reset_offset,
-				"qcom,mdss-pipe-vig-sw-reset-map",
-				mdata->vig_pipes, mdata->nvig_pipes);
-		if (mdata->rgb_pipes)
-			mdss_mdp_parse_dt_pipe_sw_reset(pdev, sw_reset_offset,
-				"qcom,mdss-pipe-rgb-sw-reset-map",
-				mdata->rgb_pipes, mdata->nrgb_pipes);
-		if (mdata->dma_pipes)
-			mdss_mdp_parse_dt_pipe_sw_reset(pdev, sw_reset_offset,
-				"qcom,mdss-pipe-dma-sw-reset-map",
-				mdata->dma_pipes, mdata->ndma_pipes);
+		mdss_mdp_parse_dt_pipe_sw_reset(pdev, sw_reset_offset,
+			"qcom,mdss-pipe-vig-sw-reset-map", mdata->vig_pipes,
+			mdata->nvig_pipes);
+		mdss_mdp_parse_dt_pipe_sw_reset(pdev, sw_reset_offset,
+			"qcom,mdss-pipe-rgb-sw-reset-map", mdata->rgb_pipes,
+			mdata->nrgb_pipes);
+		mdss_mdp_parse_dt_pipe_sw_reset(pdev, sw_reset_offset,
+			"qcom,mdss-pipe-dma-sw-reset-map", mdata->dma_pipes,
+			mdata->ndma_pipes);
 	}
 
 	mdata->has_panic_ctrl = of_property_read_bool(pdev->dev.of_node,
 		"qcom,mdss-has-panic-ctrl");
 	if (mdata->has_panic_ctrl) {
-		if (mdata->vig_pipes)
-			mdss_mdp_parse_dt_pipe_panic_ctrl(pdev,
-				"qcom,mdss-pipe-vig-panic-ctrl-offsets",
+		mdss_mdp_parse_dt_pipe_panic_ctrl(pdev,
+			"qcom,mdss-pipe-vig-panic-ctrl-offsets",
 				mdata->vig_pipes, mdata->nvig_pipes);
-		if (mdata->rgb_pipes)
-			mdss_mdp_parse_dt_pipe_panic_ctrl(pdev,
-				"qcom,mdss-pipe-rgb-panic-ctrl-offsets",
+		mdss_mdp_parse_dt_pipe_panic_ctrl(pdev,
+			"qcom,mdss-pipe-rgb-panic-ctrl-offsets",
 				mdata->rgb_pipes, mdata->nrgb_pipes);
-		if (mdata->dma_pipes)
-			mdss_mdp_parse_dt_pipe_panic_ctrl(pdev,
-				"qcom,mdss-pipe-dma-panic-ctrl-offsets",
+		mdss_mdp_parse_dt_pipe_panic_ctrl(pdev,
+			"qcom,mdss-pipe-dma-panic-ctrl-offsets",
 				mdata->dma_pipes, mdata->ndma_pipes);
 	}
 

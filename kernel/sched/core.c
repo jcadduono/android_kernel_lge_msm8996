@@ -829,6 +829,14 @@ void sched_set_cluster_dstate(const cpumask_t *cluster_cpus, int dstate,
 	cluster->dstate_wakeup_latency = wakeup_latency;
 }
 
+/* ADAPT_LGE_BMC */
+int sched_get_cpu_cstate(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	return rq->cstate;
+}
+
 #endif /* CONFIG_SCHED_HMP */
 
 #endif /* CONFIG_SMP */
@@ -3442,6 +3450,17 @@ exit_early:
 				     early_detection[i]);
 		i++;
 	}
+}
+
+unsigned long sched_get_busy(int cpu)
+{
+	struct cpumask query_cpu = CPU_MASK_NONE;
+	struct sched_load busy;
+
+	cpumask_set_cpu(cpu, &query_cpu);
+	sched_get_cpus_busy(&busy, &query_cpu);
+
+	return busy.prev_load;
 }
 
 void sched_set_io_is_busy(int val)

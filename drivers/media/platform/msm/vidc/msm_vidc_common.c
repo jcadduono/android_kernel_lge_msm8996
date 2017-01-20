@@ -22,6 +22,7 @@
 #include "vidc_hfi_api.h"
 #include "msm_vidc_debug.h"
 #include "msm_vidc_dcvs.h"
+#include "msm_vdec.h"
 
 #define IS_ALREADY_IN_STATE(__p, __d) ({\
 	int __rc = (__p >= __d);\
@@ -78,7 +79,6 @@ const char *const mpeg_video_vidc_extradata[] = {
 	"Extradata light level SEI",
 	"Extradata display VUI",
 	"Extradata vpx color space",
-	"Extradata PQ Info",
 };
 
 struct getprop_buf {
@@ -1210,8 +1210,9 @@ static void handle_event_change(enum hal_command_response cmd, void *data)
 			"V4L2_EVENT_SEQ_CHANGED_INSUFFICIENT due to bit-depth change\n");
 	}
 
-	if (inst->fmts[CAPTURE_PORT]->fourcc == V4L2_PIX_FMT_NV12 &&
-		inst->pic_struct != event_notify->pic_struct) {
+//		if (inst->pic_struct != event_notify->pic_struct) {
+	    if (inst->pic_struct != event_notify->pic_struct && !((inst->flags & VIDC_SECURE) && (inst->fmts[OUTPUT_PORT]->fourcc == V4L2_PIX_FMT_MPEG2))){
+//[S][LGDTV][isdbt-fwk@lge.com] Conditions are added to check if instance is secure and mpeg2
 		inst->pic_struct = event_notify->pic_struct;
 		event = V4L2_EVENT_SEQ_CHANGED_INSUFFICIENT;
 		ptr[2] |= V4L2_EVENT_PICSTRUCT_FLAG;
@@ -1993,7 +1994,8 @@ static void handle_fbd(enum hal_command_response cmd, void *data)
 				vb->v4l2_planes[0].bytesused,
 				vb->v4l2_planes[0].length);
 		if (!(fill_buf_done->flags1 &
-			HAL_BUFFERFLAG_TIMESTAMPINVALID)) {
+			HAL_BUFFERFLAG_TIMESTAMPINVALID) &&
+			fill_buf_done->filled_len1) {
 			time_usec = fill_buf_done->timestamp_hi;
 			time_usec = (time_usec << 32) |
 				fill_buf_done->timestamp_lo;
@@ -3891,6 +3893,7 @@ int msm_comm_try_get_bufreqs(struct msm_vidc_inst *inst)
 	dprintk(VIDC_PROF, "Input buffers: %d, Output buffers: %d\n",
 			inst->buff_req.buffer[0].buffer_count_actual,
 			inst->buff_req.buffer[1].buffer_count_actual);
+
 	return rc;
 }
 
@@ -4678,9 +4681,6 @@ enum hal_extradata_id msm_comm_get_hal_extradata_index(
 		break;
 	case V4L2_MPEG_VIDC_EXTRADATA_VPX_COLORSPACE:
 		ret = HAL_EXTRADATA_VPX_COLORSPACE;
-		break;
-	case V4L2_MPEG_VIDC_EXTRADATA_PQ_INFO:
-		ret = HAL_EXTRADATA_PQ_INFO;
 		break;
 	default:
 		dprintk(VIDC_WARN, "Extradata not found: %d\n", index);

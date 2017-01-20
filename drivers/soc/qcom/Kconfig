@@ -691,6 +691,8 @@ config TRACER_PKT
 	  processor communication protocols. The profiling information
 	  can be logged into the tracer packet itself.
 
+source "drivers/soc/qcom/lge/Kconfig"
+
 config MSM_SECURE_BUFFER
 	bool "Helper functions for securing buffers through TZ"
 	help
@@ -811,12 +813,6 @@ config MSM_REMOTEQDSS
 	  events. Provide a sysfs interface for debug tools to dynamically
 	  enable/disable these events. Interface located in
 	  /sys/class/remoteqdss.
-
-config QCOM_SMCINVOKE
-	bool "Secure QSEE Support"
-	help
-	  Enable SMCInvoke driver which supports capability based secure
-	  communication between QSEE and HLOS.
 
 source "drivers/soc/qcom/memshare/Kconfig"
 
